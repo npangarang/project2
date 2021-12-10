@@ -46,93 +46,315 @@ class_diag <- function(score, truth, positive, cutoff=.5){
 
 # Mining, Classification, Prediction
 
-## Name and EID here
+## Neel Panging (np22679)
 
 ### Introduction 
 
-Paragraph or two introducing your datasets and variables, why they are interesting to you, etc. See instructions for more information
-
 ```{R}
 library(tidyverse)
-# read your datasets in here, e.g., with read_csv()
-
-# if your dataset needs tidying, do so here
-
-# any other code here
+data = read_csv("spotify_songs.csv")
+glimpse(data)
 ```
+dataset source: https://rpubs.com/jiaol/spotify_songs
+This dataset contains song data from Spotify (audio features), and I found it after digging through different Spotify data repositories on Google until I found this one. This one was created by another user (jaiol), who leveraged the Spotify API to parse audio features for each track.
+There are 32,833 observations in this data, and here are descriptions of some of these major audio features as according to Spotify's Developer Studio:
+
+*track_popularity* <dbl> (range: [0,100]) - This is a song popularity rating that's calculated on the day that this dataset was generated (i.e. 4/3/2020). Spotify calculates this value based on different factors such as the songs total number of streams with an emphasis on the more recent/current number of streams. 
+
+*acousticness* <dbl> (range: [0,1]) - 
+A confidence measure from 0.0 to 1.0 of whether the track is acoustic. 1.0 represents high confidence the track is acoustic.
+
+*danceability* <dbl> (range: [0,1]) -
+Danceability describes how suitable a track is for dancing based on a combination of musical elements including tempo, rhythm stability, beat strength, and overall regularity. A value of 0.0 is least danceable and 1.0 is most danceable.
+
+*duration_ms* <int> -
+The duration of the track in milliseconds.
+
+*energy* <dbl> (range: [0,1]) -
+Energy is a measure from 0.0 to 1.0 and represents a perceptual measure of intensity and activity. Typically, energetic tracks feel fast, loud, and noisy. For example, death metal has high energy, while a Bach prelude scores low on the scale. Perceptual features contributing to this attribute include dynamic range, perceived loudness, timbre, onset rate, and general entropy.
+
+*instrumentalness* <dbl> (range: [0,1]) -
+Predicts whether a track contains no vocals. "Ooh" and "aah" sounds are treated as instrumental in this context. Rap or spoken word tracks are clearly "vocal". The closer the instrumentalness value is to 1.0, the greater likelihood the track contains no vocal content. Values above 0.5 are intended to represent instrumental tracks, but confidence is higher as the value approaches 1.0.
+
+*key* <int> (range: [-1, 11]) -
+The key the track is in. Integers map to pitches using standard Pitch Class notation. E.g. 0 = C, 1 = C♯/D♭, 2 = D, and so on. If no key was detected, the value is -1.
+
+*liveness* <dbl> (range: [0,1]) -
+Detects the presence of an audience in the recording. Higher liveness values represent an increased probability that the track was performed live. A value above 0.8 provides strong likelihood that the track is live.
+
+*loudness* <dbl> -
+The overall loudness of a track in decibels (dB). Loudness values are averaged across the entire track and are useful for comparing relative loudness of tracks. Loudness is the quality of a sound that is the primary psychological correlate of physical strength (amplitude). Values typically range between -60 and 0 db.
+
+*mode* <int> (range: [0,1]) -
+Mode indicates the modality (major or minor) of a track, the type of scale from which its melodic content is derived. Major is represented by 1 and minor is 0.
+
+*speechiness* <float> (range: [0,1]) -
+Speechiness detects the presence of spoken words in a track. The more exclusively speech-like the recording (e.g. talk show, audio book, poetry), the closer to 1.0 the attribute value. Values above 0.66 describe tracks that are probably made entirely of spoken words. Values between 0.33 and 0.66 describe tracks that may contain both music and speech, either in sections or layered, including such cases as rap music. Values below 0.33 most likely represent music and other non-speech-like tracks.
+
+*tempo* <float> -
+The overall estimated tempo of a track in beats per minute (BPM). In musical terminology, tempo is the speed or pace of a given piece and derives directly from the average beat duration.
+
+
+*time_signature* <int> (range: [3,7]) -
+An estimated time signature. The time signature (meter) is a notational convention to specify how many beats are in each bar (or measure). The time signature ranges from 3 to 7 indicating time signatures of "3/4", to "7/4".
+
+*valence* <dbl> (range: [0,1]) -
+A measure from 0.0 to 1.0 describing the musical positiveness conveyed by a track. Tracks with high valence sound more positive (e.g. happy, cheerful, euphoric), while tracks with low valence sound more negative (e.g. sad, depressed, angry).
+
+Source: https://developer.spotify.com/documentation/web-api/reference/#/operations/get-audio-features 
+
+However, it looks like we there isn't an explicit binary variable (for classification later) in this dataset, so let's create one out of the *popularity* variable.
+```{r}
+hist(data$track_popularity)
+```
+Let's bin this data by popularity to turn it into a binary variable. We can label the songs that fall in the bottom half of the popularity values with a 0, and the songs that fall in the top half of the popularity values with a 1.
+
+```{R}
+
+data <- data %>% 
+  mutate(popular = ifelse(track_popularity <= median(track_popularity), 0, 1))
+
+data %>%
+  group_by(popular) %>%
+  summarise (count = n())
+```
+Through this, we have 16485 songs considered unpopular and 16348 considered popular. Let's also check out the other two categorical variables (playlist_genre and playlist_subgenre)
+```{r}
+data %>%
+  group_by(playlist_genre) %>%
+  summarise (count = n())
+data %>%
+  group_by(playlist_subgenre) %>%
+  summarise (count = n())
+```
+Lastly, let's also get rid of some of the "id" variables as shown above, because they don't provide us much value.
+```{r}
+data <- data %>% select(-c(track_id, track_album_id, playlist_id))
+```
+
 
 ### Cluster Analysis
 
-```{R}
+```{r}
 library(cluster)
-# clustering code here
+set.seed(1234)
+
+cols = c("danceability", "energy", "speechiness", "acousticness", "tempo")
+# A subset of the data was chosen because using the full dataset was unable to compile
+temp <- sample_n(data, 1000) %>% 
+  select(cols)
+
+sil_width<-vector()
+for(i in 2:10){  
+  pam_fit <- pam(temp, k = i)  
+  sil_width[i] <- pam_fit$silinfo$avg.width  
+}
+ggplot()+geom_line(aes(x=1:10,y=sil_width))+scale_x_continuous(name="k",breaks=1:10)
+```
+```{R}
+pam1 <- pam(temp, k = 3)
+pam1$silinfo$avg.width
 ```
 
-Discussion of clustering here
-    
+```{r}
+library(GGally)
+temp %>% mutate(cluster = as.factor(pam1$cluster)) %>% 
+    ggpairs(columns = 1:6, aes(color = cluster))
+```
+
+After performing PAM clustering, it looks like k = 3 is the sweet spot for the number of clusters (i.e. k=3 results in the greatest sillhoutte width of 0.62 which is considered a reasonable fit). Upon visualizing these clusters, the strongest relationship was found between acousticness/energy, with tempo/danceability coming second (although having half as strong of a correlation). The other variable combinations seem to have relatively weak relationships. Another observation is that among all the variables, the clusters seem to differ the most in regard to the tempo, which might imply that despite having very similar audio features in other aspects, two songs can be classified very differently based on their tempos. 
     
 ### Dimensionality Reduction with PCA
-
 ```{R}
-# PCA code here
+temp2 <- data %>% select_if(is.numeric) %>% scale
+songPCA <- princomp(temp2)
+summary(songPCA, loadings=T)
+```
+Now let's take a look at a scree plot for this information
+```{R}
+eigval<-songPCA$sdev^2 #square to convert SDs to eigenvalues
+varprop=round(eigval/sum(eigval), 2) #proportion of var explained by each PC
+ggplot() + geom_bar(aes(y=varprop, x=1:14), stat="identity") + xlab("") + geom_path(aes(y=varprop, x=1:14)) + 
+  geom_text(aes(x=1:14, y=varprop, label=round(varprop, 2)), vjust=1, col="white", size=5) + 
+  scale_y_continuous(breaks=seq(0, .6, .2), labels = scales::percent) + 
+  scale_x_continuous(breaks=1:10)
+```
+```{r}
+# Cumulative proportions
+round(cumsum(eigval)/sum(eigval), 2)
 ```
 
-Discussions of PCA here. 
+```{r}
+# eigenvalues
+eigval
+```
+The scree plot isn't the best indicator of which PCs to keep because there's isn't really a point where the plot flattens. However, since PC1-PC8 explain 77% of the variance and since the PC1-PC6 have eigenvalues that are roughly >=1 as shown above, let's stick with 7 PCs. Now let's visualize these PCs!
+```{r}
+songPCA$loadings[1:14, 1:2] %>% as.data.frame %>% rownames_to_column %>% 
+ggplot() + geom_hline(aes(yintercept=0), lty=2) + 
+  geom_vline(aes(xintercept=0), lty=2) + ylab("PC2") + xlab("PC1") + 
+  geom_segment(aes(x=0, y=0, xend=Comp.1, yend=Comp.2), arrow=arrow(), col="red") + 
+  geom_label(aes(x=Comp.1*1.1, y=Comp.2*1.1, label=rowname))
+```
+
+Now let's try to interpret the first 7 PCs
+
+```{r}
+songPCA$loadings
+```
+*PC1* - I would describe this is the "vibe" axis. In otherwords, this axis shows that more energetic/loud songs are often less acoustic (and vice versa). An example of this might be hype rap/hip-hop songs which are likely to be less acoustic than say, Billie Eilish/Lana Del Rey songs, which are much more acoustic but less energetic/loud. 
+
+*PC2* - This looks like a popularity-measurement axis. This axis portrays that the song popularity is typically higher when the song is slightly more energetic/loud and less instrumental/long. This is reflective of the features a typical pop song might have (usually upbeat, energetic, catchy vocals, and not too long).
+
+*PC3* - I would describe this is the "groove" axis. In particular, this shows that the more danceable songs are those that have more valence (i.e. are more positive and uplifting). Interestingly though, the less danceable/positive these songs are, the slightly more popular they are.
+
+*PC4* - This axis portrays that mode is inversely correlated with the key of a song. The mode tells us if the song is written in a major or minor key, and major keys sound happier/more positive while minor keys sound darker/more sorrowful. Thus, it seems that a lower mode (i.e. a song that is in a minor key) is associated with a higher musical key. This implies that the minor-songs are typically written in higher minor keys (e.g. Ab minor, B minor according the the Spotify Developer documentation).
+
+*PC5* - This axis describes the speechiness of a song and how it pertains to some other factors. In particular, it looks like the less speechy (less words there are) a song is, the less tempo it might have (which makes sense because high tempo songs such as  rap/hip-hop songs are definitely more speechy).
+
+*PC6 & PC7* - These are the weaker axes that portray slight relationships between a songs instrumentalness and tempo.
+
+As evident by lines 185-188, PC1-PC7 account for 70% of the variance in the dataset.
 
 ###  Linear Classifier
+Now let's try to predict the popularity of a song (the popular variable we created earlier) using logistic regression. However, it'd be unfair to use the "track_popularity" here as a variable to help with prediction because we used this to create the "poplar" variable in the first place. We'll remove track_popularity for now then.
+
+Then, let's use the following 10 of the audio features as predictors:
 
 ```{R}
-# linear classifier code here
+temp <- data %>% select_if(is.numeric) %>% select(-c(track_popularity))
+fit <- glm(popular ~ danceability + energy + key + loudness + mode + acousticness + instrumentalness + valence + tempo + duration_ms, data=temp, family="binomial")
+score <- predict(fit, type="response")
+class_diag(score,truth=data$popular, positive=1)
 ```
+The AUC of this model is 0.6247, which is actually considered poor. Let's look at the confusion matrix anyways. 
+```{r}
+x<- data.frame("predicted" = score, "actual" = data$popular) %>% 
+  mutate(predicted = ifelse(predicted <= 0.5, "popular", "unpopular")) %>%
+  mutate(actual = ifelse(actual <= 0.5, "popular", "unpopular"))
 
+table(actual = x$actual, predicted = x$predicted)
+
+```
+Now let's run a logistic regression using k-fold cross validation
 ```{R}
-# cross-validation of linear classifier here
+set.seed(1234)
+k=10
+folds<-cut(seq(1:nrow(temp)),breaks=k,labels=F) #create folds
+diags<-NULL
+for(i in 1:k){
+  ## Create training and test sets
+  train<-temp[folds!=i,] 
+  test<-temp[folds==i,]
+  truth<-test$popular ## Truth labels for fold i
+  ## Train model on training set (all but fold i)
+  fit <- glm(popular ~ danceability + energy + key + loudness + mode + acousticness + instrumentalness + valence + tempo + duration_ms,     data=temp, family="binomial")
+  ## Test model on test set (fold i) 
+  probs<-predict(fit,newdata = test,type="response")
+  ## Get diagnostics for fold i
+  diags<-rbind(diags,class_diag(probs,truth, positive=1))
+}
+summarize_all(diags,mean)
 ```
-
-Discussion here
+It seems that the performance averaged across the k-folds is roughly identical to the performance of the sole logistic regression model on the entire dataset. Unfortunately, the auc is still poor (0.60933). However, there aren't really any signs of overfitting because this AUC is roughly the same as what it was before.
 
 ### Non-Parametric Classifier
 
+Now let's train a KNN model on our data.
+
 ```{R}
 library(caret)
-# non-parametric classifier code here
+
+knn_fit <- knn3(factor(popular==1,levels=c("TRUE","FALSE")) ~ danceability + energy + key + loudness + mode + acousticness + instrumentalness + valence + tempo + duration_ms, data=temp, k=5)
+y_hat_knn <- predict(knn_fit,data)
+
+```
+
+```{r}
+class_diag(y_hat_knn[,1],data$popular, positive=1)
+```
+We see that the AUC for this KNN model is much better (0.7892) than that of the logistic regression model. This AUC is considered fair, but is really close to good (good is > 0.8) as per the rules of thumb for AUC. Here is the corresponding confusion matrix: 
+```{r}
+table(truth= factor(data$popular==1, levels=c("TRUE","FALSE")),
+      prediction= factor(y_hat_knn[,1]>.5, levels=c("TRUE","FALSE")))
 ```
 
 ```{R}
-# cross-validation of np classifier here
+set.seed(1234)
+k=10 #choose number of folds
+
+folds<-cut(seq(1:nrow(temp)),breaks=k,labels=F) #create folds
+diags<-NULL
+for(i in 1:k){
+  ## Create training and test sets
+  train<-temp[folds!=i,] 
+  test<-temp[folds==i,]
+  truth<-test$popular
+  
+  fit<-knn3(popular~danceability + energy + key + loudness + mode + acousticness + instrumentalness + valence + tempo + duration_ms,data=train)
+  ## Test model on test set (fold i) 
+  probs<-predict(fit,newdata = test)[,2]
+  ## Get diagnostics for fold i
+  diags<-rbind(diags,class_diag(probs,truth, positive=1))
+}
 ```
 
-Discussion
-
+```{r}
+summarize_all(diags,mean)
+```
+There is a noticeable AUC drop when performing k-fold CV with the KNN model. In particular, the AUC is 0.57603, which is considered poor. The AUC of the model without k-fold CV had a good AUC, which implies that this model might be overfitting! Thus, the KNN model without k-fold CV seems to be performing considerably better than the logistic classifier as evident by its higher accuracy and AUC values. 
 
 ### Regression/Numeric Prediction
-
+Now let's fit a linear regression model. Instead of predicting whether or not a song is popular (i.e. binary variable), let's try to predict the track_popularity metric itself. In that case, let's drop the popularity variable we created earlier instead. 
 ```{R}
-# regression model code here
+temp <- data %>% select_if(is.numeric) %>% select(-c(popular))
+fit<-lm(track_popularity~danceability + energy + key + loudness + mode + acousticness + instrumentalness + valence + tempo + duration_ms,data=temp)
+yhat<-predict(fit)
 ```
 
+```{r}
+mean((temp$track_popularity-yhat)^2)
+```
+The MSE for this linear regression model across the entire dataset is 580.126
+
 ```{R}
-# cross-validation of regression model here
+set.seed(1234)
+k=10 #choose number of folds
+diags<-NULL
+for(i in 1:k){
+  train<-temp[folds!=i,]
+  test<-temp[folds==i,]
+  ## Fit linear regression model to training set
+  fit<-lm(track_popularity~danceability + energy + key + loudness + mode + acousticness + instrumentalness + valence + tempo + duration_ms,data=train)
+  ## Get predictions/y-hats on test set (fold i)
+  yhat<-predict(fit,newdata=test)
+  ## Compute prediction error  (MSE) for fold i
+  diags<-mean((test$track_popularity-yhat)^2) 
+}
+mean(diags)
 ```
 
-Discussion
+It seems that the MSE is higher after using k-fold CV for the linear regression model, but this value isn't that much greater than the original MSE of 580.126 (about 2.72% greater), so there aren't strong signs of overfitting. 
 
 ### Python 
-
+Now let's use Python to get the song with the highest track popularity
 ```{R}
 library(reticulate)
+use_python("/usr/bin/python3", required = F)
+hi<-"Hello"
 ```
 
 ```{python}
-# python code here
+songs = r.data
+idx = songs['track_popularity'].index(max(songs['track_popularity']))
+print(songs['track_name'][idx], songs['track_artist'][idx], songs['track_popularity'][idx], sep=" | ")
 ```
 
-Discussion
+Using Python, I parsed the name and artist of the most popular song (based on track_popularity). This song happened to be *Dance Monkey* by *Tones and I*
 
 ### Concluding Remarks
 
-Include concluding remarks here, if any
-
+Thanks for an awesome semester!
 
 
 
